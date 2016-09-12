@@ -412,6 +412,7 @@ public class RF24 {
         if (pipe < 0 || pipe > 5)
             throw new RF24Exception();
         setRegisterBits(EN_RXADDR_REGISTER, BV(pipe));
+        writeRegister(RX_ADDR_P0+pipe, address);
     }
 
     /**

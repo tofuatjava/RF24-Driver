@@ -142,9 +142,12 @@ public class Test_RF24 {
 
                 // if reply, then read reply
                 if (rf24.available()) {
+                    boolean more;
                     p("\nReply: ");
-                    while (rf24.read(data32))
-                        System.out.println(Utils.dumpData(data32));
+                    do {
+                        more = rf24.read(data32);
+                        p(Utils.dumpData(data32));
+                    } while (more);
                 } else
                     p("\nNo reply.");
 
