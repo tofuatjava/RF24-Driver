@@ -395,9 +395,11 @@ public class RF24 {
         // Note that AVR 8-bit uC's store this LSB first, and the NRF24L01(+)
         // expects it LSB first too, so we're good.
 
-        writeRegister(RX_ADDR_P0,address);
-        writeRegister(TX_ADDR, address);
-        writeRegister(RX_PW_P0, (byte)payloadSize);
+        writeRegister(TX_ADDR, address);                // set transmitter address
+
+        setRegisterBits(EN_RXADDR_REGISTER, BV(0));     // enable receiving on pipe 0
+        writeRegister(RX_ADDR_P0,address);              // set receiving address for pipe 0 so we can listen to replies
+        writeRegister(RX_PW_P0, (byte)payloadSize);     // set payload size for replies
 
     }
 
@@ -411,8 +413,9 @@ public class RF24 {
     public void openReadingPipe(int pipe, byte[] address) throws PigpioException {
         if (pipe < 0 || pipe > 5)
             throw new RF24Exception();
-        setRegisterBits(EN_RXADDR_REGISTER, BV(pipe));
-        writeRegister(RX_ADDR_P0+pipe, address);
+        setRegisterBits(EN_RXADDR_REGISTER, BV(pipe));      // enable receiving on specified pipe
+        writeRegister(RX_ADDR_P0+pipe, address);            // set receiving address for specified pipe
+        writeRegister(RX_PW_P0+pipe, (byte)payloadSize);    // set payload size
     }
 
     /**
