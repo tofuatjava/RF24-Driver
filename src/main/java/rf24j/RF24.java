@@ -156,7 +156,7 @@ public class RF24 {
      * @return true if initialized successfully
      * @throws PigpioException
      */
-    public boolean init(int cePin, int csnPin) throws PigpioException {
+    public synchronized boolean init(int cePin, int csnPin) throws PigpioException {
         this.cePin = cePin;
         this.csnPin = csnPin;
 
@@ -197,7 +197,7 @@ public class RF24 {
      * according to nRF24 documentation
      * @throws PigpioException
      */
-    public void reset() throws  PigpioException {
+    public synchronized void reset() throws  PigpioException {
         csnLow();
         flushTx();
         csnHigh();
@@ -257,7 +257,7 @@ public class RF24 {
      * Flushes both RX and TX FIFOs. Resets STATUS register flags.
      * @throws PigpioException
      */
-    public void startListening() throws PigpioException {
+    public synchronized void startListening() throws PigpioException {
         byte confReg = readByteRegister(CONFIG_REGISTER);
         writeRegister(CONFIG_REGISTER, (byte)(confReg | BV(PWR_UP) | BV(PRIM_RX)) );
         writeRegister(STATUS_REGISTER, (byte)(BV(RX_DR) | BV(TX_DS) | BV(MAX_RT)) );
@@ -280,7 +280,7 @@ public class RF24 {
      * Flushes both RX and TX FIFOs.
      * @throws PigpioException
      */
-    public void stopListening() throws PigpioException {
+    public synchronized void stopListening() throws PigpioException {
         ceLow();
         //flushTx();
         //flushRx();
@@ -292,7 +292,7 @@ public class RF24 {
      * @param data data to be sent
      * @throws PigpioException
      */
-    public void startWrite(byte[] data) throws PigpioException{
+    public synchronized void startWrite(byte[] data) throws PigpioException{
 
         // power up (PWR_UP=1) and set to transmit mode (PRIM_RX=0)
         byte cfg = readByteRegister(CONFIG_REGISTER);
@@ -315,15 +315,15 @@ public class RF24 {
      * @return 0 if OK, 1 if number of retries reached, 2 if timeout occurred
      * @throws PigpioException
      */
-    public int write(byte[] value) throws PigpioException {
+    public synchronized int write(byte[] value) throws PigpioException {
         byte[] buff = value.clone();
         byte status;
         int result = 0;
 
         ceLow();
         // if fixed payload size and value is shorter than payload size
-        if (!dynPayloadEnabled && (buff.length < payloadSize) )
-            buff = Arrays.copyOf(buff,payloadSize); // then extend to payload size
+        if (!dynPayloadEnabled && (buff.length != payloadSize) )
+            buff = Arrays.copyOf(buff,payloadSize); // then extend or shrink to payload size
 
         startWrite(buff);
 
@@ -355,7 +355,7 @@ public class RF24 {
      * @return true if there is data available for reading
      * @throws PigpioException
      */
-    public boolean available() throws PigpioException {
+    public synchronized boolean available() throws PigpioException {
         // See note in getData() function - just checking RX_DR isn't good enough
         byte status = readByteRegister(STATUS_REGISTER);
 
@@ -376,7 +376,7 @@ public class RF24 {
      * @return true if there is no more data available
      * @throws PigpioException
      */
-    public boolean read( byte data[]) throws PigpioException {
+    public synchronized boolean read( byte data[]) throws PigpioException {
         // Fetch the payload
         nrfSpiWrite(R_RX_PAYLOAD, data); // Read payload
         setRegisterBits(STATUS_REGISTER,BV(RX_DR)); // clear RX_DR
@@ -391,13 +391,15 @@ public class RF24 {
      * Address should be provided with LSB first.
      * @throws PigpioException
      */
-    public void openWritingPipe(byte[] address) throws PigpioException {
+    public synchronized void openWritingPipe(byte[] address) throws PigpioException {
         // Note that AVR 8-bit uC's store this LSB first, and the NRF24L01(+)
         // expects it LSB first too, so we're good.
 
-        writeRegister(RX_ADDR_P0,address);
-        writeRegister(TX_ADDR, address);
-        writeRegister(RX_PW_P0, (byte)payloadSize);
+        writeRegister(TX_ADDR, address);                // set transmitter address
+
+        setRegisterBits(EN_RXADDR_REGISTER, BV(0));     // enable receiving on pipe 0
+        writeRegister(RX_ADDR_P0,address);              // set receiving address for pipe 0 so we can listen to replies
+        writeRegister(RX_PW_P0, (byte)payloadSize);     // set payload size for replies
 
     }
 
@@ -408,11 +410,13 @@ public class RF24 {
      * Address should be LSB first.
      * @throws PigpioException
      */
-    public void openReadingPipe(int pipe, byte[] address) throws PigpioException {
+    public synchronized void openReadingPipe(int pipe, byte[] address) throws PigpioException {
         if (pipe < 0 || pipe > 5)
             throw new RF24Exception();
-        setRegisterBits(EN_RXADDR_REGISTER, BV(pipe));
-        writeRegister(RX_ADDR_P0+pipe, address);
+
+        setRegisterBits(EN_RXADDR_REGISTER, BV(pipe));      // enable receiving on specified pipe
+        writeRegister(RX_ADDR_P0+pipe, address);            // set receiving address for specified pipe
+        writeRegister(RX_PW_P0+pipe, (byte)payloadSize);    // set payload size
     }
 
     /**
@@ -425,7 +429,7 @@ public class RF24 {
      * @param count Number of retries (0 = no retries, max 15 retries)
      * @throws PigpioException
      */
-    public void setRetries(int delay, int count) throws PigpioException {
+    public synchronized void setRetries(int delay, int count) throws PigpioException {
         writeRegister(SETUP_RETR_REGISTER,(byte)((delay & 0x0F) << ARD | (count & 0xf)<<ARC));
     }
 
@@ -435,7 +439,7 @@ public class RF24 {
      * @param ch channel 0-127
      * @throws PigpioException
      */
-    public void setChannel(int ch) throws PigpioException {
+    public synchronized void setChannel(int ch) throws PigpioException {
         writeRegister(RF_CH_REGISTER, (byte)(ch & 0x7F)); // max 127 = 0x7F
     }
 
@@ -445,7 +449,7 @@ public class RF24 {
      * @param size payload size 1-32 bytes
      * @throws PigpioException
      */
-    public void setPayloadSize(int size) {
+    public synchronized void setPayloadSize(int size) {
         if (size>0 && size <33)
             this.payloadSize = size;
         else
@@ -456,7 +460,7 @@ public class RF24 {
      * Get static payload size.
      * @return
      */
-    public int getPayloadSize() {
+    public synchronized int getPayloadSize() {
         return payloadSize;
     }
 
@@ -473,7 +477,7 @@ public class RF24 {
      * @param enable true to enable, false to disable
      * @throws PigpioException
      */
-    public void setAutoACK(boolean enable) throws PigpioException{
+    public synchronized void setAutoACK(boolean enable) throws PigpioException{
         if (enable)
             writeRegister(EN_AA_REGISTER,(byte)0b00111111);
         else
@@ -486,7 +490,7 @@ public class RF24 {
      * @param enable
      * @throws PigpioException
      */
-    public void setAutoACK(int pipe, boolean enable) throws PigpioException{
+    public synchronized void setAutoACK(int pipe, boolean enable) throws PigpioException{
         if (enable)
             setRegisterBits(EN_AA_REGISTER,(byte)(1<<pipe));
         else
@@ -502,7 +506,7 @@ public class RF24 {
      *              RF24_PA_MAX = 0db
      * @throws PigpioException
      */
-    public void setPALevel(int level) throws PigpioException{
+    public synchronized void setPALevel(int level) throws PigpioException{
         byte setupReg = readByteRegister(RF_SETUP);
         byte newValue = setupReg;
 
@@ -522,7 +526,7 @@ public class RF24 {
      * 				RF24_2MBPS = 2 Mbit/2*
      * @throws PigpioException
      */
-    public void setDataRate(int dataRate) throws PigpioException{
+    public synchronized void setDataRate(int dataRate) throws PigpioException{
         byte setupReg = readByteRegister(RF_SETUP);
         byte newValue = setupReg;
 
@@ -547,7 +551,7 @@ public class RF24 {
      * @param length CRC length in bytes (0 = disable, 1 = 8 bits, 2 = 16 bits)
      * @throws PigpioException
      */
-    public void setCRCLength(int length) throws PigpioException {
+    public synchronized void setCRCLength(int length) throws PigpioException {
         switch (length){
             case 0:
                 clearRegisterBits(CONFIG_REGISTER, (byte)(1<<EN_CRC));  // disable CRC
@@ -569,7 +573,7 @@ public class RF24 {
      * @return CRC length in bytes
      * @throws PigpioException
      */
-    public int getCRCLength() throws PigpioException {
+    public synchronized int getCRCLength() throws PigpioException {
         int l = 1;
         if ((readByteRegister(CONFIG_REGISTER) & (byte)(1<<CRCO)) != 0)
             l = 2;
@@ -582,7 +586,7 @@ public class RF24 {
      * Disable CRC
      * @throws PigpioException
      */
-    public void disableCRC() throws PigpioException {
+    public synchronized void disableCRC() throws PigpioException {
         setCRCLength(0);
     }
 
@@ -591,7 +595,7 @@ public class RF24 {
      * Return detailed information about nRF24 chip
      * @return String containing information
      */
-    public String printDetails(){
+    public synchronized String printDetails(){
         String p = "";
 
         try {
@@ -678,7 +682,7 @@ public class RF24 {
      * Enter Power-down Mode
      * @throws PigpioException
      */
-    public void powerDown() throws PigpioException {
+    public synchronized void powerDown() throws PigpioException {
         clearRegisterBits(CONFIG_REGISTER,(byte)(1<<PWR_UP));
     }
 
@@ -686,7 +690,7 @@ public class RF24 {
      * Leave low-power mode - make radio more reponsive
      * @throws PigpioException
      */
-    public void powerUp() throws PigpioException {
+    public synchronized void powerUp() throws PigpioException {
         setRegisterBits(CONFIG_REGISTER,(byte)(1<<PWR_UP));
     }
 
@@ -706,7 +710,7 @@ public class RF24 {
      * @return true if signal => -64dBm, false if not
      * @throws PigpioException
      */
-    public boolean testRPD() throws PigpioException {
+    public synchronized boolean testRPD() throws PigpioException {
         return (readByteRegister(RPD) & 1) == 1;
     }
 
@@ -718,7 +722,7 @@ public class RF24 {
      * @param width Width in bytes. Allowed values are 3,4,5.
      * @throws PigpioException
      */
-    public void setAddressWidth(int width) throws PigpioException {
+    public synchronized void setAddressWidth(int width) throws PigpioException {
 		/* Initialize with NOP so we get the first byte read back. */
         switch (width){
             case 3:
@@ -741,7 +745,7 @@ public class RF24 {
      * @return address width in bytes (3-5)
      * @throws PigpioException
      */
-    public int getAddressWidth() throws PigpioException {
+    public synchronized int getAddressWidth() throws PigpioException {
         byte w = readByteRegister(SETUP_AW_REGISTER);
         int l = -1;
         switch (w & 0b11){
@@ -762,7 +766,7 @@ public class RF24 {
      * Terminate connection to nRF24 chip
      * @throws PigpioException
      */
-    public void terminate() throws PigpioException {
+    public synchronized void terminate() throws PigpioException {
         ceLow();
         powerDown();
     }
@@ -853,7 +857,7 @@ public class RF24 {
      * @return register value
      * @throws PigpioException
      */
-    public byte readByteRegister(int reg) throws PigpioException{
+    public synchronized byte readByteRegister(int reg) throws PigpioException{
         byte data[] = {NOP};
         readRegister(reg,data);
         return data[0];
@@ -865,7 +869,7 @@ public class RF24 {
      * @param value array of bytes to store read values to
      * @throws PigpioException
      */
-    public void readRegister(int reg, byte value[]) throws PigpioException {
+    public synchronized void readRegister(int reg, byte value[]) throws PigpioException {
         nrfSpiWrite((R_REGISTER | (REGISTER_MASK & reg)), value);
     } // End of readRegister
 
@@ -876,7 +880,7 @@ public class RF24 {
      * @param data
      * @throws PigpioException
      */
-    public void writeRegister(int reg, byte data[]) throws PigpioException {
+    public synchronized void writeRegister(int reg, byte data[]) throws PigpioException {
         //System.out.println("Write register: " + reg + ", mask = " + (W_REGISTER | (REGISTER_MASK & reg)) );
 
         // The register value will be 32 + reg number as the coding of writing a register is
@@ -891,7 +895,7 @@ public class RF24 {
      * @param value new register value
      * @throws PigpioException
      */
-    public void writeRegister(int reg, byte value) throws PigpioException {
+    public synchronized void writeRegister(int reg, byte value) throws PigpioException {
         byte data[] = {value};
         writeRegister(reg, data);
     }
@@ -902,7 +906,7 @@ public class RF24 {
      * @param bits bits to set
      * @throws PigpioException
      */
-    public void setRegisterBits(int reg, byte bits) throws PigpioException {
+    public synchronized void setRegisterBits(int reg, byte bits) throws PigpioException {
         byte regVal = readByteRegister(reg);
         byte newVal = regVal;
         newVal = (byte)(newVal | bits);
@@ -915,7 +919,7 @@ public class RF24 {
      * @param bits bts to clear
      * @throws PigpioException
      */
-    public void clearRegisterBits(int reg, byte bits) throws PigpioException {
+    public synchronized void clearRegisterBits(int reg, byte bits) throws PigpioException {
         byte regVal = readByteRegister(reg);
         byte newVal = regVal;
         newVal = (byte)(newVal & ~bits);
