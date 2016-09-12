@@ -1,3 +1,5 @@
+package rf24j;
+
 import jpigpio.JPigpio;
 import jpigpio.PigpioException;
 import jpigpio.WrongModeException;
@@ -263,8 +265,8 @@ public class RF24 {
         //pigpio.gpioDelay(2,JPigpio.PI_MILLISECONDS); // 1.5ms to start
 
         // Flush buffers
-        flushRx();
-        flushTx();
+        //flushRx();
+        //flushTx();
 
         // Start listening now
         ceHigh();
@@ -280,8 +282,30 @@ public class RF24 {
      */
     public void stopListening() throws PigpioException {
         ceLow();
-        flushTx();
-        flushRx();
+        //flushTx();
+        //flushRx();
+    }
+
+    /**
+     * Send data packet - no checking for if sending was successful is done. <br/>
+     * Use method write for more complex approach.
+     * @param data data to be sent
+     * @throws PigpioException
+     */
+    public void startWrite(byte[] data) throws PigpioException{
+
+        // power up (PWR_UP=1) and set to transmit mode (PRIM_RX=0)
+        byte cfg = readByteRegister(CONFIG_REGISTER);
+        writeRegister(CONFIG_REGISTER, (byte)(( cfg | BV(PWR_UP) ) & ~BV(PRIM_RX) ) );
+        pigpio.gpioDelay(150); // wait for settling the chip
+        //pigpio.gpioDelay(2,JPigpio.PI_MILLISECONDS); // 1.5ms to start if in power-down mode
+
+        // Send the payload
+        nrfSpiWrite(W_TX_PAYLOAD, data);   // Write to TX FIFO register
+
+        // flash CE=1 for more than 15us to send the packet
+        pigpio.gpioTrigger(cePin,20,true);
+
     }
 
     /**
@@ -291,8 +315,8 @@ public class RF24 {
      * @return 0 if OK, 1 if number of retries reached, 2 if timeout occurred
      * @throws PigpioException
      */
-    public int write(byte value[]) throws PigpioException {
-        byte buff[] = value.clone();
+    public int write(byte[] value) throws PigpioException {
+        byte[] buff = value.clone();
         byte status;
         int result = 0;
 
@@ -301,22 +325,7 @@ public class RF24 {
         if (!dynPayloadEnabled && (buff.length < payloadSize) )
             buff = Arrays.copyOf(buff,payloadSize); // then extend to payload size
 
-        // power up (PWR_UP=1) and set to transmit mode (PRIM_RX=0)
-        byte cfgReg = readByteRegister(CONFIG_REGISTER);
-        writeRegister(CONFIG_REGISTER, (byte)( (cfgReg | BV(PWR_UP) ) & ~BV(PRIM_RX)) );
-
-        pigpio.gpioDelay(2,JPigpio.PI_MILLISECONDS); // 1.5ms to start if in power-down mode
-
-        // Send the payload
-        nrfSpiWrite(W_TX_PAYLOAD, buff);   // Write to TX FIFO register
-        ceHigh();
-
-        // settle
-        pigpio.gpioDelay(150, JPigpio.PI_MICROSECONDS); // 130us required by chip to settle
-
-        // wait for packet to be sent
-        pigpio.gpioDelay(20, JPigpio.PI_MICROSECONDS);
-        ceLow();
+        startWrite(buff);
 
         long timeout = System.currentTimeMillis() + 500;
 
@@ -331,7 +340,10 @@ public class RF24 {
             else
                 result = 2; // send timeout
 
+        // result of write operation is captured so we can reset TX_DS & MAX_RT bits
         writeRegister(STATUS_REGISTER,(byte)( status | BV(TX_DS) | BV(MAX_RT)));
+
+        //TODO: Handle ACK payload
 
         powerDown();
 
@@ -347,17 +359,19 @@ public class RF24 {
         // See note in getData() function - just checking RX_DR isn't good enough
         byte status = readByteRegister(STATUS_REGISTER);
 
-        // We can short circuit on RX_DR, but if it's not set, we still need
-        // to check the FIFO for any pending packets
         if ((status & BV(RX_DR)) != 0) {
+            clearRegisterBits(STATUS_REGISTER, BV(RX_DR));
             return true;
         }
 
+        // We can short circuit on RX_DR, but if it's not set, we still need
+        // to check the FIFO for any pending packets
         return (readByteRegister(FIFO_STATUS_REGISTER) & BV(RX_EMPTY)) == 0;
     } // End of dataReady
 
     /**
-     * Read payload
+     * Read payload.<br/>
+     * Read should be repeated until method returns false.
      * @param data array to store data into
      * @return true if there is no more data available
      * @throws PigpioException
@@ -365,10 +379,10 @@ public class RF24 {
     public boolean read( byte data[]) throws PigpioException {
         // Fetch the payload
         nrfSpiWrite(R_RX_PAYLOAD, data); // Read payload
-        setRegisterBits(STATUS_REGISTER,(byte)(1<<RX_DR)); // clear RX_DR
+        setRegisterBits(STATUS_REGISTER,BV(RX_DR)); // clear RX_DR
 
-        // was this the last of the data available?
-        return (readByteRegister(FIFO_STATUS_REGISTER) & BV(RX_EMPTY)) > 0;
+        // was this the last of the data available? if RX_EMPTY == 1 => no more data to read
+        return (readByteRegister(FIFO_STATUS_REGISTER) & BV(RX_EMPTY)) == 0;
     }
 
     /**
@@ -397,7 +411,7 @@ public class RF24 {
     public void openReadingPipe(int pipe, byte[] address) throws PigpioException {
         if (pipe < 0 || pipe > 5)
             throw new RF24Exception();
-        setRegisterBits(EN_RXADDR_REGISTER, (byte) (1 << pipe));
+        setRegisterBits(EN_RXADDR_REGISTER, BV(pipe));
     }
 
     /**
@@ -562,7 +576,6 @@ public class RF24 {
         return l;
     }
 
-    //TODO: public int getCRCLength()
 
     /**
      * Disable CRC
@@ -596,8 +609,7 @@ public class RF24 {
 
             p += "\nRX_ADDR_P2-5    = ";
             for(int i = 2;i<6;i++)
-                p += "\n0x"+String.format("%02x",rxAddr[i][0])+"  ";
-            p += "\n";
+                p += "0x"+String.format("%02x",rxAddr[i][0])+"  ";
 
             byte txAddr[] = new byte[5];
             readRegister(TX_ADDR,txAddr);
@@ -678,8 +690,6 @@ public class RF24 {
     }
 
     //TODO: public boolean available(int pipe)
-
-    //TODO: public void startWrite
 
     //TODO: public void writeAckPayload
 
@@ -765,8 +775,8 @@ public class RF24 {
      * @param bit
      * @return An integer with the specific bit set.
      */
-    private int BV(int bit) {
-        return 1 << bit;
+    private byte BV(int bit) {
+        return (byte)(1 << bit);
     } // End of BV
 
     private void nrfSpiWrite(int reg, byte data[]) throws PigpioException {
