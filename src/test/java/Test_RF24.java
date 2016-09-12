@@ -1,5 +1,6 @@
 
 import jpigpio.*;
+import rf24j.RF24;
 
 import java.io.BufferedReader;
 import java.io.IOException;
@@ -18,15 +19,16 @@ public class Test_RF24 {
 
     public void run() throws PigpioException {
 
+        System.out.println("Creating pigpio...");
         JPigpio pigpio = new PigpioSocket("pigpiod-host", 8888);
 
         //JPigpio pigpio = new Pigpio();
 
+        System.out.println("Going to initialize pigpio...");
         pigpio.gpioInitialize();
 
+        System.out.println("Creating RF24...");
         rf24 = new RF24(pigpio);
-        System.out.println(rf24.printDetails());
-
         p("Initializing...");
         if (!rf24.init(cePin, csnPin)) {
             p("Failed to initialize nRF module. Module not present?");
@@ -39,9 +41,9 @@ public class Test_RF24 {
         rf24.setAddressWidth(5);
 
         // set remote device address - to which data will be sent and from which data will be received
-        byte rAddr[] = { 'R', 'C', 'V', '0', '1' };
+        byte rcvAddr[] = { 'R', 'C', 'V', '0', '1' };
         // set transmitter device address - from which data will be sent
-        byte tAddr[] = { 'S', 'N', 'D', '0', '1' };
+        byte sndAddr[] = { 'S', 'N', 'D', '0', '1' };
 
         // following params should be configured the same as the other side
         rf24.setPayloadSize(32); 				// 32 bytes payload
@@ -55,12 +57,13 @@ public class Test_RF24 {
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
 
         byte role = 0;
-        String cmd = "R";  // start with sender role
+        String cmd = "S";  // start with sender role
 
         byte counter = 0;
         byte senderData[] = new byte[] {1,2,3,4};
         byte receiverReply[] = new byte[] {99,99,0,0,0,0,0};
         byte data32[] = new byte[32];
+        long timeout = 0;
 
         rf24.clearRegisterBits(RF24.CONFIG_REGISTER,(byte)(1<< RF24.MASK_RX_DR));
         System.out.println(rf24.printDetails());
@@ -83,8 +86,8 @@ public class Test_RF24 {
                     role = 0;
                     rf24.stopListening();
                     rf24.powerDown();
-                    rf24.openReadingPipe(1,rAddr);
-                    rf24.openWritingPipe(tAddr);
+                    rf24.openReadingPipe(1,rcvAddr);
+                    rf24.openWritingPipe(sndAddr);
                     System.out.println(rf24.printDetails());
                     break;
 
@@ -93,8 +96,8 @@ public class Test_RF24 {
                     cmd = "";
                     role = 1;
                     rf24.powerDown();
-                    rf24.openReadingPipe(1,tAddr);
-                    rf24.openWritingPipe(rAddr);
+                    rf24.openReadingPipe(1,sndAddr);
+                    rf24.openWritingPipe(rcvAddr);
                     System.out.println(rf24.printDetails());
                     rf24.startListening();
                     break;
@@ -130,17 +133,26 @@ public class Test_RF24 {
 
                 // Handle reply from receiver
                 rf24.startListening();  // start listening for reply
-                try { Thread.sleep(100);} catch (InterruptedException e){} // wait for reply
+                timeout = System.currentTimeMillis() + 3000;
 
-                // if OK, then read reply
-                if (rf24.available()) {
-                    while (rf24.read(data32))
-                        System.out.print("Reply : "+Utils.dumpData(data32));
+                // wait for reply
+                while (!rf24.available() && System.currentTimeMillis() < timeout){
+                    System.out.print("w");
                 }
 
-                rf24.stopListening();  // done with listening, back to sending
+                // if reply, then read reply
+                if (rf24.available()) {
+                    boolean more;
+                    p("\nReply: ");
+                    do {
+                        more = rf24.read(data32);
+                        p(Utils.dumpData(data32));
+                    } while (more);
+                } else
+                    p("\nNo reply.");
 
-                try { Thread.sleep(200);} catch (InterruptedException e){}
+                rf24.stopListening();
+
             }
 
             // RECEIVER ROLE =======================

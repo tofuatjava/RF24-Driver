@@ -1,3 +1,5 @@
+package rf24j;
+
 /**
  * Created by Jozef on 09.09.2016.
  */

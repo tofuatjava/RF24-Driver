@@ -1,3 +1,5 @@
+package rf24j;
+
 import jpigpio.PigpioException;
 
 /**
