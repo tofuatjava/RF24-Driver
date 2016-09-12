@@ -413,6 +413,7 @@ public class RF24 {
     public void openReadingPipe(int pipe, byte[] address) throws PigpioException {
         if (pipe < 0 || pipe > 5)
             throw new RF24Exception();
+
         setRegisterBits(EN_RXADDR_REGISTER, BV(pipe));      // enable receiving on specified pipe
         writeRegister(RX_ADDR_P0+pipe, address);            // set receiving address for specified pipe
         writeRegister(RX_PW_P0+pipe, (byte)payloadSize);    // set payload size
