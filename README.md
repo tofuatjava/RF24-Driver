@@ -1,4 +1,4 @@
-# RF24j
-Java implementation of RF24 library for Raspberry Pi.
+# RF24 -Driver
+Integration of an SPI based nRF24 radio transmitter with Eclipse Kura IoT-gateway.
 
-It requires JPigpio library developed by Neil Kolban (https://github.com/nkolban/jpigpio) and pigpio library/daemon (http://abyz.co.uk/rpi/pigpio/index.html)
+the implementation is based on the work from sovcik/RF24j
